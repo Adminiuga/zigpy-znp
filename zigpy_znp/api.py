@@ -142,6 +142,7 @@ class ZNP:
     def __init__(self, device_config: conf.ConfigType):
         self._uart = None
         self._app = None
+        self._inhibit_reconnect = False
         self._config = conf.SCHEMA_DEVICE(device_config)
 
         self._response_listeners = defaultdict(list)
@@ -166,25 +167,22 @@ class ZNP:
 
     @classmethod
     async def probe(cls, device_config: conf.ConfigType) -> bool:
-        new_config = conf.SCHEMA_DEVICE(device_config)
-        new_config[conf.CONF_ZNP_CONFIG][conf.CONF_AUTO_RECONNECT] = False
-
-        znp = cls(new_config)
-
+        znp = cls(conf.SCHEMA_DEVICE(device_config))
         LOGGER.debug("Probing %s", znp._port_path)
 
         try:
-            await znp.connect()
+            await znp.connect(inhibit_reconnect=False)
             return True
         except Exception:
             return False
         finally:
             znp.close()
 
-    async def connect(self) -> None:
+    async def connect(self, inhibit_reconnect: bool = False) -> None:
         assert self._uart is None
 
         self._uart = await uart.connect(self._config, self)
+        self._inhibit_reconnect = inhibit_reconnect
         LOGGER.debug("Testing connection to %s", self._uart.transport.serial.name)
 
         try:
@@ -238,10 +236,7 @@ class ZNP:
         self._cancel_all_listeners()
 
         # exc=None means that the connection was closed
-        if (
-            not self._config[conf.CONF_ZNP_CONFIG][conf.CONF_AUTO_RECONNECT]
-            or exc is None
-        ):
+        if self._inhibit_reconnect or exc is None:
             LOGGER.debug("Connection was purposefully closed. Not reconnecting.")
             return
 
